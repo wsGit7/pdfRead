@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PDF Speed Reader</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: auto;
+    }
+    #controls {
+      margin-bottom: 20px;
+    }
+    #display {
+      font-size: 24px;
+      line-height: 1.4;
+      min-height: 4em;
+      border: 1px solid #ccc;
+      padding: 1em;
+      border-radius: 4px;
+      background: #f9f9f9;
+    }
+    button {
+      margin-left: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>PDF Speed Reader</h1>
+
+  <div id="controls">
+    <input type="file" id="fileInput" accept="application/pdf"/>
+    <label>
+      Seconds per 100 characters:
+      <input type="number" id="speedInput" value="2" step="0.1" min="0.1"/>
+    </label>
+    <button id="startBtn">Start</button>
+    <button id="pauseBtn" disabled>Pause</button>
+    <button id="resumeBtn" disabled>Resume</button>
+  </div>
+
+  <div id="display">Load a PDF and click “Start” to begin.</div>
+
+  <!-- PDF.js library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  <script>
+    // Configure PDF.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+
+    const fileInput  = document.getElementById('fileInput');
+    const speedInput = document.getElementById('speedInput');
+    const startBtn   = document.getElementById('startBtn');
+    const pauseBtn   = document.getElementById('pauseBtn');
+    const resumeBtn  = document.getElementById('resumeBtn');
+    const display    = document.getElementById('display');
+
+    let sentences   = [];
+    let index       = 0;
+    let timerId     = null;
+    let isPaused    = false;
+
+    startBtn.addEventListener('click', () => {
+      const file = fileInput.files[0];
+      if (!file) {
+        alert('Please choose a PDF file first.');
+        return;
+      }
+      resetState();
+      readPdfFile(file).then(text => {
+        sentences = splitIntoSentences(text);
+        index = 0;
+        startBtn.disabled = true;
+        fileInput.disabled = true;
+        speedInput.disabled = true;
+        pauseBtn.disabled = false;
+        displayNextSentence();
+      }).catch(err => {
+        console.error(err);
+        alert('Error reading PDF. Check console for details.');
+      });
+    });
+
+    pauseBtn.addEventListener('click', () => {
+      if (timerId) clearTimeout(timerId);
+      isPaused = true;
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = false;
+      display.textContent += ' 〔Paused〕';
+    });
+
+    resumeBtn.addEventListener('click', () => {
+      isPaused = false;
+      resumeBtn.disabled = true;
+      pauseBtn.disabled = false;
+      // remove paused marker
+      display.textContent = display.textContent.replace(' 〔Paused〕', '');
+      displayNextSentence();
+    });
+
+    function resetState() {
+      if (timerId) clearTimeout(timerId);
+      sentences = [];
+      index = 0;
+      isPaused = false;
+      display.textContent = '';
+      startBtn.disabled = false;
+      pauseBtn.disabled = true;
+      resumeBtn.disabled = true;
+    }
+
+    async function readPdfFile(file) {
+      // load ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map(item => item.str);
+        fullText += strings.join(' ') + ' ';
+      }
+      return fullText;
+    }
+
+    function splitIntoSentences(text) {
+      // Split by ., ! or ? but keep the punctuation
+      const regex = /[^\.!\?]+[\.!\?]+(?:["']|)?|[^\.!\?]+$/g;
+      return text.match(regex)
+        ?.map(s => s.trim())
+        .filter(s => s.length) || [];
+    }
+
+    function displayNextSentence() {
+      if (isPaused) return;
+      if (index >= sentences.length) {
+        display.textContent = '〔End of document〕';
+        pauseBtn.disabled = true;
+        resumeBtn.disabled = true;
+        return;
+      }
+
+      const sentence = sentences[index++];
+      display.textContent = sentence;
+
+      // compute delay: user seconds per 100 chars
+      const baseSec = parseFloat(speedInput.value) || 1;
+      const delayMs = Math.max(200, (sentence.length * baseSec / 100) * 1000);
+
+      timerId = setTimeout(displayNextSentence, delayMs);
+    }
+  </script>
+</body>
+</html>
