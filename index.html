@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <!-- Declare UTF-8 for the document -->
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>PDF Speed Reader</title>
   <style>
@@ -13,6 +15,11 @@
     }
     #controls {
       margin-bottom: 20px;
+    }
+    #info {
+      font-size: 16px;
+      margin-bottom: 10px;
+      font-weight: bold;
     }
     #display {
       font-size: 24px;
@@ -42,11 +49,12 @@
     <button id="resumeBtn" disabled>Resume</button>
   </div>
 
+  <div id="info">Sentences: 0 | Current: 0 | Progress: 0%</div>
   <div id="display">Load a PDF and click “Start” to begin.</div>
 
-  <!-- PDF.js library -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
-  <script>
+  <!-- PDF.js library, with explicit charset -->
+  <script charset="utf-8" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  <script charset="utf-8">
     // Configure PDF.js worker
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
@@ -56,12 +64,13 @@
     const startBtn   = document.getElementById('startBtn');
     const pauseBtn   = document.getElementById('pauseBtn');
     const resumeBtn  = document.getElementById('resumeBtn');
+    const infoEl     = document.getElementById('info');
     const display    = document.getElementById('display');
 
-    let sentences   = [];
-    let index       = 0;
-    let timerId     = null;
-    let isPaused    = false;
+    let sentences = [];
+    let index     = 0;
+    let timerId   = null;
+    let isPaused  = false;
 
     startBtn.addEventListener('click', () => {
       const file = fileInput.files[0];
@@ -70,24 +79,27 @@
         return;
       }
       resetState();
-      readPdfFile(file).then(text => {
-        sentences = splitIntoSentences(text);
-        index = 0;
-        startBtn.disabled = true;
-        fileInput.disabled = true;
-        speedInput.disabled = true;
-        pauseBtn.disabled = false;
-        displayNextSentence();
-      }).catch(err => {
-        console.error(err);
-        alert('Error reading PDF. Check console for details.');
-      });
+      readPdfFile(file)
+        .then(text => {
+          sentences = splitIntoSentences(text);
+          index = 0;
+          startBtn.disabled   = true;
+          fileInput.disabled  = true;
+          speedInput.disabled = true;
+          pauseBtn.disabled   = false;
+          updateInfo();
+          displayNextSentence();
+        })
+        .catch(err => {
+          console.error(err);
+          alert('Error reading PDF. Check console for details.');
+        });
     });
 
     pauseBtn.addEventListener('click', () => {
-      if (timerId) clearTimeout(timerId);
+      clearTimeout(timerId);
       isPaused = true;
-      pauseBtn.disabled = true;
+      pauseBtn.disabled  = true;
       resumeBtn.disabled = false;
       display.textContent += ' 〔Paused〕';
     });
@@ -95,25 +107,26 @@
     resumeBtn.addEventListener('click', () => {
       isPaused = false;
       resumeBtn.disabled = true;
-      pauseBtn.disabled = false;
-      // remove paused marker
+      pauseBtn.disabled  = false;
       display.textContent = display.textContent.replace(' 〔Paused〕', '');
       displayNextSentence();
     });
 
     function resetState() {
-      if (timerId) clearTimeout(timerId);
+      clearTimeout(timerId);
       sentences = [];
-      index = 0;
-      isPaused = false;
+      index     = 0;
+      isPaused  = false;
       display.textContent = '';
-      startBtn.disabled = false;
-      pauseBtn.disabled = true;
-      resumeBtn.disabled = true;
+      infoEl.textContent  = 'Sentences: 0 | Current: 0 | Progress: 0%';
+      startBtn.disabled   = false;
+      pauseBtn.disabled   = true;
+      resumeBtn.disabled  = true;
+      fileInput.disabled  = false;
+      speedInput.disabled = false;
     }
 
     async function readPdfFile(file) {
-      // load ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       let fullText = '';
@@ -127,28 +140,39 @@
     }
 
     function splitIntoSentences(text) {
-      // Split by ., ! or ? but keep the punctuation
       const regex = /[^\.!\?]+[\.!\?]+(?:["']|)?|[^\.!\?]+$/g;
       return text.match(regex)
         ?.map(s => s.trim())
         .filter(s => s.length) || [];
     }
 
+    function updateInfo() {
+      const total   = sentences.length;
+      const current = Math.min(index, total);
+      const pct     = total ? ((current / total) * 100).toFixed(1) : '0.0';
+      infoEl.textContent =
+        `Sentences: ${total} | Current: ${current} | Progress: ${pct}%`;
+    }
+
     function displayNextSentence() {
       if (isPaused) return;
+
       if (index >= sentences.length) {
-        display.textContent = '〔End of document〕';
-        pauseBtn.disabled = true;
-        resumeBtn.disabled = true;
+        display.textContent     = '〔End of document〕';
+        pauseBtn.disabled       = true;
+        resumeBtn.disabled      = true;
+        updateInfo();
         return;
       }
 
-      const sentence = sentences[index++];
-      display.textContent = sentence;
+      display.textContent = sentences[index++];
+      updateInfo();
 
-      // compute delay: user seconds per 100 chars
       const baseSec = parseFloat(speedInput.value) || 1;
-      const delayMs = Math.max(200, (sentence.length * baseSec / 100) * 1000);
+      const delayMs = Math.max(
+        200,
+        (sentences[index - 1].length * baseSec / 100) * 1000
+      );
 
       timerId = setTimeout(displayNextSentence, delayMs);
     }
